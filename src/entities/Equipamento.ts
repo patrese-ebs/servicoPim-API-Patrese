@@ -19,6 +19,12 @@ export class Equipamento {
   @Column({ type: "varchar", nullable: false })
   localizacao!: string;
 
+  @Column({ type: "varchar", nullable: false, default: "Operação" })
+  setor!: string;
+
+  @Column({ type: "varchar", nullable: true })
+  numero_patrimonio!: string | null;
+
   @Column({ type: "varchar", nullable: true })
   fabricante!: string | null;
 
@@ -27,6 +33,12 @@ export class Equipamento {
 
   @Column({ type: "boolean", default: true })
   ativo!: boolean;
+
+  @Column({ type: "timestamptz", default: () => "CURRENT_TIMESTAMP" })
+  data_cadastro!: Date;
+
+  @Column({ type: "date", nullable: true })
+  ultima_revisao!: string | null;
 
   @OneToMany(() => OrdemServico, (ordemServico) => ordemServico.equipamento)
   ordensServico!: OrdemServico[];

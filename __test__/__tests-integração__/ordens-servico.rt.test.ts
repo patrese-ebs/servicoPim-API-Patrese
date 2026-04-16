@@ -5,6 +5,7 @@ import { Usuario } from "../../src/entities/Usuario.js";
 import { Equipamento } from "../../src/entities/Equipamento.js";
 import { OrdemServico } from "../../src/entities/OrdemServico.js";
 import { HistoricoOS } from "../../src/entities/HistoricoOS.js";
+import { ApontamentoOS } from "../../src/entities/ApontamentoOS.js";
 import { Perfil } from "../../src/types/usr_perfil.js";
 import { Like } from "typeorm";
 import bcrypt from "bcryptjs";
@@ -54,11 +55,13 @@ describe("Testes de Integração - Rotas de Ordens de Serviço (Banco Real)", ()
         // Limpar dados de teste anteriores
         const historicoRepo = appDataSource.getRepository(HistoricoOS);
         const osRepo = appDataSource.getRepository(OrdemServico);
+        const apontamentoRepo = appDataSource.getRepository(ApontamentoOS);
         const equipRepo = appDataSource.getRepository(Equipamento);
         const userRepo = appDataSource.getRepository(Usuario);
 
         // Limpar na ordem correta (respeitar FKs)
         await historicoRepo.createQueryBuilder().delete().execute();
+        await apontamentoRepo.createQueryBuilder().delete().execute();
         await osRepo.createQueryBuilder().delete().execute();
         await equipRepo.delete({ codigo: Like("TESTE-OS-%") });
         await userRepo.delete({ email: Like("%os-rt@teste.com") });
@@ -104,10 +107,12 @@ describe("Testes de Integração - Rotas de Ordens de Serviço (Banco Real)", ()
         if (appDataSource.isInitialized) {
             const historicoRepo = appDataSource.getRepository(HistoricoOS);
             const osRepo = appDataSource.getRepository(OrdemServico);
+            const apontamentoRepo = appDataSource.getRepository(ApontamentoOS);
             const equipRepo = appDataSource.getRepository(Equipamento);
             const userRepo = appDataSource.getRepository(Usuario);
 
             await historicoRepo.createQueryBuilder().delete().execute();
+            await apontamentoRepo.createQueryBuilder().delete().execute();
             await osRepo.createQueryBuilder().delete().execute();
             await equipRepo.delete({ codigo: Like("TESTE-OS-%") });
             await userRepo.delete({ email: Like("%os-rt@teste.com") });
@@ -272,6 +277,7 @@ describe("Testes de Integração - Rotas de Ordens de Serviço (Banco Real)", ()
     // FLUXO COMPLETO: Criar -> Atribuir Técnico -> Concluir
     describe("Fluxo completo de OS", () => {
         let osId: string;
+        let apontamentoId: string;
 
         test("PATCH /ordens-servico/:id/atribuir-tecnico - Deve atribuir técnico", async () => {
             const createRes = await request(app)
@@ -292,17 +298,78 @@ describe("Testes de Integração - Rotas de Ordens de Serviço (Banco Real)", ()
                 .send({ tecnicoId });
 
             expect(response.status).toBe(200);
-            expect(response.body.status).toBe("EM_ANDAMENTO");
+            expect(response.body.status).toBe("ABERTA");
             expect(response.body.tecnico).toBeDefined();
             expect(response.body.tecnico.id).toBe(tecnicoId);
+            expect(response.body.inicio_em).toBeNull();
+        });
+
+        test("PATCH /ordens-servico/:id/iniciar - Deve iniciar a OS", async () => {
+            const response = await request(app)
+                .patch(`/ordens-servico/${osId}/iniciar`)
+                .set("Authorization", `Bearer ${tecnicoToken}`);
+
+            expect(response.status).toBe(200);
+            expect(response.body.status).toBe("EM_ANDAMENTO");
             expect(response.body.inicio_em).toBeDefined();
+        });
+
+        test("POST /ordens-servico/:id/apontamentos/iniciar - Deve iniciar apontamento", async () => {
+            const response = await request(app)
+                .post(`/ordens-servico/${osId}/apontamentos/iniciar`)
+                .set("Authorization", `Bearer ${tecnicoToken}`)
+                .send({ observacao: "Início do diagnóstico do servidor" });
+
+            expect(response.status).toBe(200);
+            expect(Array.isArray(response.body)).toBe(true);
+            expect(response.body).toHaveLength(1);
+            expect(response.body[0].fimEm).toBeNull();
+            apontamentoId = response.body[0].id;
+        });
+
+        test("POST /ordens-servico/:id/apontamentos/iniciar - Deve falhar com apontamento já aberto", async () => {
+            const response = await request(app)
+                .post(`/ordens-servico/${osId}/apontamentos/iniciar`)
+                .set("Authorization", `Bearer ${tecnicoToken}`)
+                .send({ observacao: "Tentativa duplicada" });
+
+            expect(response.status).toBe(400);
+            expect(response.body.message).toBe("Já existe um apontamento de trabalho em aberto para esta OS");
+        });
+
+        test("GET /ordens-servico/:id/apontamentos - Deve listar apontamentos da OS", async () => {
+            const response = await request(app)
+                .get(`/ordens-servico/${osId}/apontamentos`)
+                .set("Authorization", `Bearer ${tecnicoToken}`);
+
+            expect(response.status).toBe(200);
+            expect(Array.isArray(response.body)).toBe(true);
+            expect(response.body[0].id).toBe(apontamentoId);
+        });
+
+        test("PATCH /ordens-servico/:id/apontamentos/finalizar - Deve finalizar apontamento", async () => {
+            const apontamentoRepo = appDataSource.getRepository(ApontamentoOS);
+            const apontamento = await apontamentoRepo.findOneByOrFail({ id: apontamentoId });
+            apontamento.inicioEm = new Date(Date.now() - 2 * 60 * 60 * 1000);
+            await apontamentoRepo.save(apontamento);
+
+            const response = await request(app)
+                .patch(`/ordens-servico/${osId}/apontamentos/finalizar`)
+                .set("Authorization", `Bearer ${tecnicoToken}`)
+                .send({ observacao: "Diagnóstico concluído" });
+
+            expect(response.status).toBe(200);
+            expect(response.body[0].fimEm).toBeDefined();
         });
 
         test("PATCH /ordens-servico/:id/status - Deve atualizar status", async () => {
             const response = await request(app)
                 .patch(`/ordens-servico/${osId}/status`)
                 .set("Authorization", `Bearer ${tecnicoToken}`)
-                .send({ status: "AGUARDANDO_PECA" });
+                .send({
+                    status: "AGUARDANDO_PECA",
+                    observacao: "Aguardando chegada do SSD 1TB Samsung EVO",
+                });
 
             expect(response.status).toBe(200);
             expect(response.body.status).toBe("AGUARDANDO_PECA");
@@ -325,7 +392,6 @@ describe("Testes de Integração - Rotas de Ordens de Serviço (Banco Real)", ()
                 .send({
                     descricao_servico: "Substituição do disco rígido e reinstalação do sistema",
                     pecas_utilizadas: "SSD 1TB Samsung EVO",
-                    horas_trabalhadas: 3,
                 });
 
             expect(response.status).toBe(200);
@@ -334,7 +400,7 @@ describe("Testes de Integração - Rotas de Ordens de Serviço (Banco Real)", ()
                 "Substituição do disco rígido e reinstalação do sistema"
             );
             expect(response.body.pecas_utilizadas).toBe("SSD 1TB Samsung EVO");
-            expect(Number(response.body.horas_trabalhadas)).toBe(3);
+            expect(Number(response.body.horas_trabalhadas)).toBeGreaterThanOrEqual(2);
             expect(response.body.conclusao_em).toBeDefined();
         });
 
@@ -406,12 +472,80 @@ describe("Testes de Integração - Rotas de Ordens de Serviço (Banco Real)", ()
             .set("Authorization", `Bearer ${tecnicoToken}`)
             .send({
                 descricao_servico: "Tentativa de conclusão sem técnico",
-                horas_trabalhadas: 1,
             });
 
         expect(response.status).toBe(400);
         expect(response.body.message).toBe(
             "Não é possível concluir uma OS sem técnico atribuído"
         );
+    });
+
+    test("PATCH /ordens-servico/:id/concluir - Deve falhar com apontamento em aberto", async () => {
+        const createRes = await request(app)
+            .post("/ordens-servico")
+            .set("Authorization", `Bearer ${solicitanteToken}`)
+            .send({
+                equipamentoId,
+                tipo_manutencao: "PREVENTIVA",
+                prioridade: "ALTA",
+                descricao_falha: "Teste de apontamento aberto",
+            });
+
+        const osId = createRes.body.id;
+
+        await request(app)
+            .patch(`/ordens-servico/${osId}/atribuir-tecnico`)
+            .set("Authorization", `Bearer ${supervisorToken}`)
+            .send({ tecnicoId });
+
+        await request(app)
+            .patch(`/ordens-servico/${osId}/iniciar`)
+            .set("Authorization", `Bearer ${tecnicoToken}`);
+
+        await request(app)
+            .post(`/ordens-servico/${osId}/apontamentos/iniciar`)
+            .set("Authorization", `Bearer ${tecnicoToken}`)
+            .send({ observacao: "Atendimento em curso" });
+
+        const response = await request(app)
+            .patch(`/ordens-servico/${osId}/concluir`)
+            .set("Authorization", `Bearer ${tecnicoToken}`)
+            .send({
+                descricao_servico: "Tentativa de conclusão com apontamento aberto",
+            });
+
+        expect(response.status).toBe(400);
+        expect(response.body.message).toBe(
+            "Finalize o apontamento de trabalho em aberto antes de concluir a OS"
+        );
+    });
+
+    test("PATCH /ordens-servico/:id/status - Deve impedir cancelamento por técnico", async () => {
+        const createRes = await request(app)
+            .post("/ordens-servico")
+            .set("Authorization", `Bearer ${solicitanteToken}`)
+            .send({
+                equipamentoId,
+                tipo_manutencao: "CORRETIVA",
+                prioridade: "ALTA",
+                descricao_falha: "Teste de cancelamento por técnico",
+            });
+
+        await request(app)
+            .patch(`/ordens-servico/${createRes.body.id}/atribuir-tecnico`)
+            .set("Authorization", `Bearer ${supervisorToken}`)
+            .send({ tecnicoId });
+
+        await request(app)
+            .patch(`/ordens-servico/${createRes.body.id}/iniciar`)
+            .set("Authorization", `Bearer ${tecnicoToken}`);
+
+        const response = await request(app)
+            .patch(`/ordens-servico/${createRes.body.id}/status`)
+            .set("Authorization", `Bearer ${tecnicoToken}`)
+            .send({ status: "CANCELADA" });
+
+        expect(response.status).toBe(403);
+        expect(response.body.message).toBe("Apenas o supervisor pode cancelar uma OS");
     });
 });

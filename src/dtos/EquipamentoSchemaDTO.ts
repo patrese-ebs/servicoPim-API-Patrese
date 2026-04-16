@@ -5,8 +5,11 @@ export const createEquipamentoSchemaDTO = z.object({
   nome: z.string().trim().min(2).max(255),
   tipo: z.string().trim().min(2).max(100),
   localizacao: z.string().trim().min(2).max(255),
+  setor: z.string().trim().min(2).max(100).optional(),
+  numero_patrimonio: z.string().trim().max(100).optional().nullable(),
   fabricante: z.string().trim().max(255).optional().nullable(),
   modelo: z.string().trim().max(255).optional().nullable(),
+  ultima_revisao: z.string().date().optional().nullable(),
   ativo: z.boolean().optional(),
 });
 

@@ -117,6 +117,10 @@ describe("Testes de Integração - Rotas de Histórico de OS (Banco Real)", () =
             .set("Authorization", `Bearer ${supervisorToken}`)
             .send({ tecnicoId });
 
+        await request(app)
+            .patch(`/ordens-servico/${osId}/iniciar`)
+            .set("Authorization", `Bearer ${tecnicoToken}`);
+
         // Atualizar status (gera mais um registro de histórico)
         await request(app)
             .patch(`/ordens-servico/${osId}/status`)
@@ -147,7 +151,7 @@ describe("Testes de Integração - Rotas de Histórico de OS (Banco Real)", () =
 
         expect(response.status).toBe(200);
         expect(Array.isArray(response.body)).toBe(true);
-        expect(response.body.length).toBeGreaterThanOrEqual(3);
+        expect(response.body.length).toBeGreaterThanOrEqual(4);
     });
 
     // BUSCAR POR OS
@@ -158,7 +162,7 @@ describe("Testes de Integração - Rotas de Histórico de OS (Banco Real)", () =
 
         expect(response.status).toBe(200);
         expect(Array.isArray(response.body)).toBe(true);
-        expect(response.body.length).toBeGreaterThanOrEqual(3);
+        expect(response.body.length).toBeGreaterThanOrEqual(4);
 
         // Verificar ordem cronológica (ASC)
         const datas = response.body.map((h: any) => new Date(h.registradoEm).getTime());

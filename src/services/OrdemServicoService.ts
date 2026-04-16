@@ -1,5 +1,5 @@
-import { AppError } from '../errors/AppError.js';
-import { Brackets, type DataSource, type EntityManager, type Repository } from "typeorm";
+import { AppError } from "../errors/AppError.js";
+import { Brackets, type DataSource, type EntityManager, type Repository, type SelectQueryBuilder } from "typeorm";
 import { OrdemServico } from "../entities/OrdemServico.js";
 import { Equipamento } from "../entities/Equipamento.js";
 import { Usuario } from "../entities/Usuario.js";
@@ -7,6 +7,8 @@ import { StatusOs } from "../types/os_status.js";
 import { Perfil } from "../types/usr_perfil.js";
 import { HistoricoOSService } from "./HistoricoOSService.js";
 import { Prioridade } from "../types/os_prioridade.js";
+import { ApontamentoOSService } from "./ApontamentoOSService.js";
+import { ApontamentoOS } from "../entities/ApontamentoOS.js";
 
 type CreateOrdemServicoDTO = {
   equipamentoId: number;
@@ -22,95 +24,132 @@ type AtribuirTecnicoDTO = {
 
 type AtualizarStatusDTO = {
   status: StatusOs;
+  observacao?: string | null;
 };
 
 type ListarOrdensServicoFilters = {
   status: StatusOs | undefined;
   prioridade: Prioridade | undefined;
-  busca?: string | undefined;
+  tecnicoId: string | undefined;
+  setor: string | undefined;
+  busca: string | undefined;
 };
 
 type ConcluirOrdemServicoDTO = {
   descricao_servico: string;
   pecas_utilizadas?: string;
-  horas_trabalhadas: number;
+};
+
+export type DashboardIndicadores = {
+  abertas: number;
+  em_andamento: number;
+  aguardando_peca: number;
+  concluidas_mes: number;
+  criticas_abertas: number;
+  sem_tecnico: number;
+  disponiveis_para_assumir: number;
+  minhas_atribuidas: number;
+  apontamento_aberto: boolean;
+  tempo_medio_execucao_horas: number;
+  tempo_medio_ate_inicio_horas: number;
+  tempo_medio_ate_conclusao_horas: number;
+  tempo_medio_trabalho_horas: number;
+};
+
+type OrdemServicoComMetricas = OrdemServico & {
+  duracao_execucao_minutos?: number | null;
+  duracao_execucao_formatada?: string | null;
+  total_trabalhado_minutos?: number;
+  total_trabalhado_formatado?: string;
+  apontamento_aberto?: boolean;
+  apontamentos?: ApontamentoOS[];
 };
 
 export class OrdemServicoService {
   private ordemServicoRepo: Repository<OrdemServico>;
-  private equipamentoRepo: Repository<Equipamento>;
-  private usuarioRepo: Repository<Usuario>;
   private historicoService: HistoricoOSService;
+  private apontamentoService: ApontamentoOSService;
 
-  constructor(
-    appDataSource: DataSource,
-    historicoService?: HistoricoOSService
-  ) {
+  constructor(appDataSource: DataSource, historicoService?: HistoricoOSService) {
     this.ordemServicoRepo = appDataSource.getRepository(OrdemServico);
-    this.equipamentoRepo = appDataSource.getRepository(Equipamento);
-    this.usuarioRepo = appDataSource.getRepository(Usuario);
-    this.historicoService = historicoService ?? new HistoricoOSService(appDataSource);
+    this.historicoService =
+      historicoService ?? new HistoricoOSService(appDataSource);
+    this.apontamentoService = new ApontamentoOSService(
+      appDataSource,
+      this.historicoService
+    );
   }
 
   async getAll(
     filters: ListarOrdensServicoFilters = {
       status: undefined,
       prioridade: undefined,
+      tecnicoId: undefined,
+      setor: undefined,
       busca: undefined,
     }
   ): Promise<OrdemServico[]> {
     const busca = filters.busca?.trim();
 
+    const query = this.ordemServicoRepo
+      .createQueryBuilder("ordemServico")
+      .leftJoinAndSelect("ordemServico.equipamento", "equipamento")
+      .leftJoinAndSelect("ordemServico.solicitante", "solicitante")
+      .leftJoinAndSelect("ordemServico.tecnico", "tecnico")
+      .leftJoinAndSelect("ordemServico.apontamentos", "apontamentos");
+
     if (busca) {
-      return await this.ordemServicoRepo
-        .createQueryBuilder("ordemServico")
-        .leftJoinAndSelect("ordemServico.equipamento", "equipamento")
-        .leftJoinAndSelect("ordemServico.solicitante", "solicitante")
-        .leftJoinAndSelect("ordemServico.tecnico", "tecnico")
-        .where(
-          new Brackets((query) => {
-            query
-              .where("ordemServico.numero ILIKE :busca", {
-                busca: `%${busca}%`,
-              })
-              .orWhere("ordemServico.descricao_falha ILIKE :busca", {
-                busca: `%${busca}%`,
-              });
-          })
-        )
-        .andWhere(
-          filters.status ? "ordemServico.status = :status" : "1=1",
-          filters.status ? { status: filters.status } : {}
-        )
-        .andWhere(
-          filters.prioridade ? "ordemServico.prioridade = :prioridade" : "1=1",
-          filters.prioridade ? { prioridade: filters.prioridade } : {}
-        )
-        .orderBy("ordemServico.abertura_em", "DESC")
-        .getMany();
+      query.andWhere(
+        new Brackets((builder) => {
+          builder
+            .where("ordemServico.numero ILIKE :busca", { busca: `%${busca}%` })
+            .orWhere("ordemServico.descricao_falha ILIKE :busca", {
+              busca: `%${busca}%`,
+            });
+        })
+      );
     }
 
-    return await this.ordemServicoRepo.find({
-      where: {
-        ...(filters.status ? { status: filters.status } : {}),
-        ...(filters.prioridade ? { prioridade: filters.prioridade } : {}),
-      },
-      relations: ["equipamento", "solicitante", "tecnico"],
-      order: { abertura_em: "DESC" },
-    });
+    if (filters.status) {
+      query.andWhere("ordemServico.status = :status", { status: filters.status });
+    }
+
+    if (filters.prioridade) {
+      query.andWhere("ordemServico.prioridade = :prioridade", {
+        prioridade: filters.prioridade,
+      });
+    }
+
+    if (filters.tecnicoId) {
+      query.andWhere("tecnico.id = :tecnicoId", {
+        tecnicoId: filters.tecnicoId,
+      });
+    }
+
+    if (filters.setor) {
+      query.andWhere("equipamento.setor ILIKE :setor", {
+        setor: `%${filters.setor}%`,
+      });
+    }
+
+    const ordens = await query
+      .orderBy("ordemServico.abertura_em", "DESC")
+      .getMany();
+
+    return ordens.map((ordem) => this.attachMetricas(ordem));
   }
 
   async getById(id: string): Promise<OrdemServico> {
     const ordemServico = await this.ordemServicoRepo.findOne({
       where: { id },
-      relations: ["equipamento", "solicitante", "tecnico"],
+      relations: ["equipamento", "solicitante", "tecnico", "apontamentos", "apontamentos.tecnico"],
     });
 
     if (!ordemServico) {
       throw new AppError("Ordem de serviço não encontrada");
     }
 
-    return ordemServico;
+    return this.attachMetricas(ordemServico);
   }
 
   async createOrdemServico(data: CreateOrdemServicoDTO): Promise<OrdemServico> {
@@ -184,11 +223,6 @@ export class OrdemServicoService {
       const statusAnterior = ordemServico.status;
       ordemServico.tecnico = tecnico;
 
-      if (ordemServico.status === StatusOs.ABERTA) {
-        ordemServico.status = StatusOs.EM_ANDAMENTO;
-        ordemServico.inicio_em = new Date();
-      }
-
       await manager.getRepository(OrdemServico).save(ordemServico);
       await this.historicoService.registrarHistorico(
         ordemServico.id,
@@ -203,13 +237,89 @@ export class OrdemServicoService {
     return await this.getById(id);
   }
 
-  async atualizarStatus(
+  async autoAtribuir(id: string, usuarioId: string): Promise<OrdemServico> {
+    await this.ordemServicoRepo.manager.transaction(async (manager) => {
+      const ordemServico = await this.getOrdemByIdOrFail(id, manager);
+      const tecnico = await manager.getRepository(Usuario).findOne({
+        where: { id: usuarioId, ativo: true },
+      });
+
+      if (!tecnico) {
+        throw new AppError("Técnico não encontrado");
+      }
+
+      if (tecnico.perfil !== Perfil.TECNICO) {
+        throw new AppError("Apenas técnicos podem assumir uma OS");
+      }
+
+      if (ordemServico.status !== StatusOs.ABERTA) {
+        throw new AppError("Apenas OS abertas podem ser assumidas");
+      }
+
+      if (ordemServico.tecnico && ordemServico.tecnico.id !== usuarioId) {
+        throw new AppError("Esta OS já possui técnico responsável");
+      }
+
+      ordemServico.tecnico = tecnico;
+      await manager.getRepository(OrdemServico).save(ordemServico);
+      await this.historicoService.registrarHistorico(
+        ordemServico.id,
+        usuarioId,
+        ordemServico.status,
+        ordemServico.status,
+        `OS assumida pelo técnico ${tecnico.nome}`,
+        manager
+      );
+    });
+
+    return await this.getById(id);
+  }
+
+  async iniciarOrdemServico(
     id: string,
-    data: AtualizarStatusDTO,
-    usuarioId: string
+    usuarioId: string,
+    usuarioPerfil: Perfil
   ): Promise<OrdemServico> {
     await this.ordemServicoRepo.manager.transaction(async (manager) => {
       const ordemServico = await this.getOrdemByIdOrFail(id, manager);
+
+      this.assertOperadorAutorizado(ordemServico, usuarioId, usuarioPerfil);
+
+      if (ordemServico.status !== StatusOs.ABERTA) {
+        throw new AppError("Apenas OS abertas podem ser iniciadas");
+      }
+
+      if (!ordemServico.tecnico) {
+        throw new AppError("Não é possível iniciar uma OS sem técnico atribuído");
+      }
+
+      const statusAnterior = ordemServico.status;
+      ordemServico.status = StatusOs.EM_ANDAMENTO;
+      ordemServico.inicio_em = ordemServico.inicio_em ?? new Date();
+
+      await manager.getRepository(OrdemServico).save(ordemServico);
+      await this.historicoService.registrarHistorico(
+        ordemServico.id,
+        usuarioId,
+        statusAnterior,
+        ordemServico.status,
+        "Execução da ordem de serviço iniciada",
+        manager
+      );
+    });
+
+    return await this.getById(id);
+  }
+
+  async atualizarStatus(
+    id: string,
+    data: AtualizarStatusDTO,
+    usuarioId: string,
+    usuarioPerfil: Perfil
+  ): Promise<OrdemServico> {
+    await this.ordemServicoRepo.manager.transaction(async (manager) => {
+      const ordemServico = await this.getOrdemByIdOrFail(id, manager);
+      this.assertOperadorAutorizado(ordemServico, usuarioId, usuarioPerfil);
 
       if (ordemServico.status === StatusOs.CONCLUIDA) {
         throw new AppError("Não é possível alterar uma OS concluída");
@@ -220,6 +330,17 @@ export class OrdemServicoService {
       }
 
       this.assertStatusTransition(ordemServico.status, data.status, ordemServico);
+
+      if (
+        data.status === StatusOs.CANCELADA &&
+        usuarioPerfil !== Perfil.SUPERVISOR
+      ) {
+        throw new AppError("Apenas o supervisor pode cancelar uma OS", 403);
+      }
+
+      if (data.status !== StatusOs.EM_ANDAMENTO) {
+        await this.apontamentoService.assertSemApontamentoAberto(id, manager);
+      }
 
       const statusAnterior = ordemServico.status;
       ordemServico.status = data.status;
@@ -234,7 +355,8 @@ export class OrdemServicoService {
         usuarioId,
         statusAnterior,
         ordemServico.status,
-        `Status alterado de ${statusAnterior} para ${ordemServico.status}`,
+        data.observacao?.trim() ||
+          `Status alterado de ${statusAnterior} para ${ordemServico.status}`,
         manager
       );
     });
@@ -245,7 +367,8 @@ export class OrdemServicoService {
   async concluirOrdemServico(
     id: string,
     data: ConcluirOrdemServicoDTO,
-    usuarioId: string
+    usuarioId: string,
+    usuarioPerfil: Perfil
   ): Promise<OrdemServico> {
     await this.ordemServicoRepo.manager.transaction(async (manager) => {
       const ordemServico = await this.getOrdemByIdOrFail(id, manager);
@@ -253,6 +376,9 @@ export class OrdemServicoService {
       if (!ordemServico.tecnico) {
         throw new AppError("Não é possível concluir uma OS sem técnico atribuído");
       }
+
+      this.assertOperadorAutorizado(ordemServico, usuarioId, usuarioPerfil);
+      await this.apontamentoService.assertSemApontamentoAberto(id, manager);
 
       if (ordemServico.status === StatusOs.CANCELADA) {
         throw new AppError("Não é possível concluir uma OS cancelada");
@@ -262,22 +388,22 @@ export class OrdemServicoService {
         throw new AppError("Descrição do serviço é obrigatória");
       }
 
-      if (
-        data.horas_trabalhadas === undefined ||
-        data.horas_trabalhadas === null
-      ) {
-        throw new AppError("Horas trabalhadas é obrigatório");
-      }
-
       const statusAnterior = ordemServico.status;
+      const conclusaoEm = new Date();
+      const inicioCalculo = new Date(
+        ordemServico.inicio_em ?? ordemServico.abertura_em
+      );
+      const resumoTrabalho = await this.apontamentoService.getResumo(id);
       ordemServico.descricao_servico = data.descricao_servico;
       ordemServico.pecas_utilizadas = data.pecas_utilizadas ?? null;
-      ordemServico.horas_trabalhadas = data.horas_trabalhadas;
+      ordemServico.horas_trabalhadas = Number(
+        (resumoTrabalho.total_trabalhado_minutos / 60).toFixed(2)
+      );
       ordemServico.status = StatusOs.CONCLUIDA;
-      ordemServico.conclusao_em = new Date();
+      ordemServico.conclusao_em = conclusaoEm;
 
       if (!ordemServico.inicio_em) {
-        ordemServico.inicio_em = new Date();
+        ordemServico.inicio_em = inicioCalculo;
       }
 
       await manager.getRepository(OrdemServico).save(ordemServico);
@@ -292,6 +418,117 @@ export class OrdemServicoService {
     });
 
     return await this.getById(id);
+  }
+
+  async getDashboard(
+    usuarioId: string,
+    usuarioPerfil: Perfil
+  ): Promise<DashboardIndicadores> {
+    const agora = new Date();
+    const inicioMes = new Date(agora.getFullYear(), agora.getMonth(), 1);
+    const scoped = this.createDashboardScopeQuery(usuarioId, usuarioPerfil);
+
+    const raw = await scoped
+      .select([
+        `COUNT(*) FILTER (WHERE ordemServico.status = :statusAberta) AS abertas`,
+        `COUNT(*) FILTER (WHERE ordemServico.status = :statusEmAndamento) AS em_andamento`,
+        `COUNT(*) FILTER (WHERE ordemServico.status = :statusAguardandoPeca) AS aguardando_peca`,
+        `COUNT(*) FILTER (WHERE ordemServico.status = :statusConcluida AND ordemServico.conclusao_em >= :inicioMes) AS concluidas_mes`,
+        `COUNT(*) FILTER (
+          WHERE ordemServico.prioridade = :prioridadeCritica
+            AND ordemServico.status NOT IN (:...statusesFechados)
+        ) AS criticas_abertas`,
+        `COUNT(*) FILTER (
+          WHERE ordemServico.status = :statusAberta
+            AND ordemServico.tecnico_id IS NULL
+        ) AS sem_tecnico`,
+        `COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(ordemServico.conclusao_em, NOW()) - COALESCE(ordemServico.inicio_em, ordemServico.abertura_em))) / 3600)
+          FILTER (WHERE ordemServico.status = :statusConcluida AND ordemServico.conclusao_em >= :inicioMes), 0) AS tempo_medio_execucao_horas`,
+        `COALESCE(AVG(EXTRACT(EPOCH FROM (ordemServico.inicio_em - ordemServico.abertura_em)) / 3600)
+          FILTER (WHERE ordemServico.inicio_em IS NOT NULL), 0) AS tempo_medio_ate_inicio_horas`,
+        `COALESCE(AVG(EXTRACT(EPOCH FROM (ordemServico.conclusao_em - ordemServico.abertura_em)) / 3600)
+          FILTER (WHERE ordemServico.status = :statusConcluida AND ordemServico.conclusao_em >= :inicioMes), 0) AS tempo_medio_ate_conclusao_horas`,
+        `COALESCE(AVG(ordemServico.horas_trabalhadas)
+          FILTER (WHERE ordemServico.status = :statusConcluida AND ordemServico.conclusao_em >= :inicioMes), 0) AS tempo_medio_trabalho_horas`,
+      ])
+      .setParameters({
+        inicioMes,
+        statusAberta: StatusOs.ABERTA,
+        statusEmAndamento: StatusOs.EM_ANDAMENTO,
+        statusAguardandoPeca: StatusOs.AGUARDANDO_PECA,
+        statusConcluida: StatusOs.CONCLUIDA,
+        prioridadeCritica: Prioridade.CRITICA,
+        statusesFechados: [StatusOs.CONCLUIDA, StatusOs.CANCELADA],
+      })
+      .getRawOne<{
+        abertas: string;
+        em_andamento: string;
+        aguardando_peca: string;
+        concluidas_mes: string;
+        criticas_abertas: string;
+        sem_tecnico: string;
+        tempo_medio_execucao_horas: string;
+        tempo_medio_ate_inicio_horas: string;
+        tempo_medio_ate_conclusao_horas: string;
+        tempo_medio_trabalho_horas: string;
+      }>();
+
+    const disponiveisParaAssumir =
+      usuarioPerfil === Perfil.TECNICO
+        ? await this.ordemServicoRepo
+            .createQueryBuilder("ordemServico")
+            .where("ordemServico.status = :status", { status: StatusOs.ABERTA })
+            .andWhere("ordemServico.tecnico_id IS NULL")
+            .getCount()
+        : 0;
+
+    const minhasAtribuidas =
+      usuarioPerfil === Perfil.TECNICO
+        ? await this.ordemServicoRepo
+            .createQueryBuilder("ordemServico")
+            .leftJoin("ordemServico.tecnico", "tecnico")
+            .where("tecnico.id = :usuarioId", { usuarioId })
+            .getCount()
+        : 0;
+
+    const apontamentoAberto =
+      usuarioPerfil === Perfil.TECNICO
+        ? await this.apontamentoService.hasOpenByTecnico(usuarioId)
+        : false;
+
+    return {
+      abertas: Number(raw?.abertas ?? 0),
+      em_andamento: Number(raw?.em_andamento ?? 0),
+      aguardando_peca: Number(raw?.aguardando_peca ?? 0),
+      concluidas_mes: Number(raw?.concluidas_mes ?? 0),
+      criticas_abertas: Number(raw?.criticas_abertas ?? 0),
+      sem_tecnico: Number(raw?.sem_tecnico ?? 0),
+      disponiveis_para_assumir: disponiveisParaAssumir,
+      minhas_atribuidas: minhasAtribuidas,
+      apontamento_aberto: apontamentoAberto,
+      tempo_medio_execucao_horas: Number(Number(raw?.tempo_medio_execucao_horas ?? 0).toFixed(2)),
+      tempo_medio_ate_inicio_horas: Number(Number(raw?.tempo_medio_ate_inicio_horas ?? 0).toFixed(2)),
+      tempo_medio_ate_conclusao_horas: Number(Number(raw?.tempo_medio_ate_conclusao_horas ?? 0).toFixed(2)),
+      tempo_medio_trabalho_horas: Number(Number(raw?.tempo_medio_trabalho_horas ?? 0).toFixed(2)),
+    };
+  }
+
+  private createDashboardScopeQuery(
+    usuarioId: string,
+    usuarioPerfil: Perfil
+  ): SelectQueryBuilder<OrdemServico> {
+    const query = this.ordemServicoRepo
+      .createQueryBuilder("ordemServico")
+      .leftJoin("ordemServico.solicitante", "solicitante")
+      .leftJoin("ordemServico.tecnico", "tecnico");
+
+    if (usuarioPerfil === Perfil.SOLICITANTE) {
+      query.where("solicitante.id = :usuarioId", { usuarioId });
+    } else if (usuarioPerfil === Perfil.TECNICO) {
+      query.where("tecnico.id = :usuarioId", { usuarioId });
+    }
+
+    return query;
   }
 
   private async getOrdemByIdOrFail(
@@ -319,10 +556,7 @@ export class OrdemServicoService {
       return;
     }
 
-    if (
-      statusNovo === StatusOs.EM_ANDAMENTO &&
-      !ordemServico.tecnico
-    ) {
+    if (statusNovo === StatusOs.EM_ANDAMENTO && !ordemServico.tecnico) {
       throw new AppError("Não é possível iniciar uma OS sem técnico atribuído");
     }
 
@@ -335,11 +569,7 @@ export class OrdemServicoService {
 
     if (
       statusAtual === StatusOs.EM_ANDAMENTO &&
-      ![
-        StatusOs.AGUARDANDO_PECA,
-        StatusOs.CANCELADA,
-        StatusOs.CONCLUIDA,
-      ].includes(statusNovo)
+      ![StatusOs.AGUARDANDO_PECA, StatusOs.CANCELADA].includes(statusNovo)
     ) {
       throw new AppError("Transição de status inválida para OS em andamento");
     }
@@ -359,5 +589,85 @@ export class OrdemServicoService {
     const nextValue = Number(result.value);
 
     return `OS-${String(nextValue).padStart(4, "0")}`;
+  }
+
+  private assertOperadorAutorizado(
+    ordemServico: OrdemServico,
+    usuarioId: string,
+    usuarioPerfil: Perfil
+  ) {
+    if (usuarioPerfil === Perfil.SUPERVISOR) {
+      return;
+    }
+
+    if (usuarioPerfil !== Perfil.TECNICO) {
+      throw new AppError("Acesso negado", 403);
+    }
+
+    if (!ordemServico.tecnico || ordemServico.tecnico.id !== usuarioId) {
+      throw new AppError("Apenas o técnico responsável pode operar esta OS", 403);
+    }
+  }
+
+  private attachMetricas(ordemServico: OrdemServico): OrdemServico {
+    const ordemComMetricas = ordemServico as OrdemServicoComMetricas;
+    const inicioBase = ordemServico.inicio_em ?? ordemServico.abertura_em;
+    const fimBase =
+      ordemServico.conclusao_em ??
+      (ordemServico.status === StatusOs.EM_ANDAMENTO ? new Date() : null);
+
+    if (!inicioBase || !fimBase) {
+      ordemComMetricas.duracao_execucao_minutos = null;
+      ordemComMetricas.duracao_execucao_formatada = null;
+      this.attachResumoTrabalho(ordemComMetricas);
+      return ordemComMetricas;
+    }
+
+    const minutos = Math.max(
+      0,
+      Math.round(
+        (new Date(fimBase).getTime() - new Date(inicioBase).getTime()) /
+          (1000 * 60)
+      )
+    );
+
+    ordemComMetricas.duracao_execucao_minutos = minutos;
+    ordemComMetricas.duracao_execucao_formatada = `${Math.floor(minutos / 60)}h ${String(
+      minutos % 60
+    ).padStart(2, "0")}min`;
+
+    this.attachResumoTrabalho(ordemComMetricas);
+    return ordemComMetricas;
+  }
+
+  private calculateHorasTrabalhadas(inicio: Date, fim: Date): number {
+    const diffHoras = (fim.getTime() - inicio.getTime()) / (1000 * 60 * 60);
+    return Number(Math.max(diffHoras, 0).toFixed(2));
+  }
+
+  private attachResumoTrabalho(ordemServico: OrdemServicoComMetricas): void {
+    const apontamentos = ordemServico.apontamentos ?? [];
+    const totalMinutos = apontamentos.reduce((acc, apontamento) => {
+      if (!apontamento.fimEm) {
+        return acc;
+      }
+
+      return (
+        acc +
+        Math.max(
+          0,
+          Math.round(
+            (new Date(apontamento.fimEm).getTime() - new Date(apontamento.inicioEm).getTime()) /
+              (1000 * 60)
+          )
+        )
+      );
+    }, 0);
+
+    ordemServico.total_trabalhado_minutos = totalMinutos;
+    ordemServico.total_trabalhado_formatado = `${Math.floor(totalMinutos / 60)}h ${String(
+      totalMinutos % 60
+    ).padStart(2, "0")}min`;
+    ordemServico.apontamento_aberto = apontamentos.some((apontamento) => !apontamento.fimEm);
   }
 }
