@@ -9,11 +9,14 @@ import {
   atribuirTecnicoSchemaDTO,
   atualizarStatusSchemaDTO,
   concluirOrdemServicoSchemaDTO,
+  apontamentoObservacaoSchemaDTO,
 } from "../dtos/OrdemServicoSchemaDTO.js";
 import { Perfil } from "../types/usr_perfil.js";
+import { ApontamentoOSController } from "../controllers/ApontamentoOSController.js";
 
 const ordemServicoRoutes = Router();
 const ordemServicoController = new OrdemServicoController();
+const apontamentoOSController = new ApontamentoOSController();
 
 ordemServicoRoutes.post(
   "/",
@@ -46,6 +49,20 @@ ordemServicoRoutes.patch(
 );
 
 ordemServicoRoutes.patch(
+  "/:id/assumir",
+  ensureAuth,
+  ensureRole(Perfil.TECNICO),
+  asyncHandler(ordemServicoController.autoAtribuir.bind(ordemServicoController))
+);
+
+ordemServicoRoutes.patch(
+  "/:id/iniciar",
+  ensureAuth,
+  ensureRole(Perfil.TECNICO, Perfil.SUPERVISOR),
+  asyncHandler(ordemServicoController.iniciar.bind(ordemServicoController))
+);
+
+ordemServicoRoutes.patch(
   "/:id/status",
   ensureAuth,
   ensureRole(Perfil.TECNICO, Perfil.SUPERVISOR),
@@ -61,6 +78,28 @@ ordemServicoRoutes.patch(
   ensureRole(Perfil.TECNICO, Perfil.SUPERVISOR),
   validarBody(concluirOrdemServicoSchemaDTO),
   asyncHandler(ordemServicoController.concluir.bind(ordemServicoController))
+);
+
+ordemServicoRoutes.get(
+  "/:id/apontamentos",
+  ensureAuth,
+  asyncHandler(apontamentoOSController.listByOs.bind(apontamentoOSController))
+);
+
+ordemServicoRoutes.post(
+  "/:id/apontamentos/iniciar",
+  ensureAuth,
+  ensureRole(Perfil.TECNICO),
+  validarBody(apontamentoObservacaoSchemaDTO),
+  asyncHandler(apontamentoOSController.iniciar.bind(apontamentoOSController))
+);
+
+ordemServicoRoutes.patch(
+  "/:id/apontamentos/finalizar",
+  ensureAuth,
+  ensureRole(Perfil.TECNICO),
+  validarBody(apontamentoObservacaoSchemaDTO),
+  asyncHandler(apontamentoOSController.finalizar.bind(apontamentoOSController))
 );
 
 export { ordemServicoRoutes };
