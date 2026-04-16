@@ -26,6 +26,12 @@ equipamentoRoutes.get(
 );
 
 equipamentoRoutes.get(
+  "/:id/detalhes",
+  ensureAuth,
+  asyncHandler(equipamentoController.getDetails.bind(equipamentoController))
+);
+
+equipamentoRoutes.get(
   "/:id",
   ensureAuth,
   asyncHandler(equipamentoController.getById.bind(equipamentoController))

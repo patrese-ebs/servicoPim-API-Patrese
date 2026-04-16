@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 import { Equipamento } from "../../src/entities/Equipamento.js";
 import { OrdemServico } from "../../src/entities/OrdemServico.js";
 import { Usuario } from "../../src/entities/Usuario.js";
+import { ApontamentoOS } from "../../src/entities/ApontamentoOS.js";
 import { OrdemServicoService } from "../../src/services/OrdemServicoService.js";
 import { StatusOs } from "../../src/types/os_status.js";
 import { Prioridade } from "../../src/types/os_prioridade.js";
@@ -36,6 +37,13 @@ const usuarioRepo = {
   findOne: jest.fn(),
 };
 
+const apontamentoRepo = {
+  findOne: jest.fn(),
+  find: jest.fn(),
+  create: jest.fn(),
+  save: jest.fn(),
+};
+
 const mockManager = {
   getRepository: jest.fn((entity) => {
     if (entity === OrdemServico) {
@@ -48,6 +56,10 @@ const mockManager = {
 
     if (entity === Usuario) {
       return usuarioRepo;
+    }
+
+    if (entity === ApontamentoOS) {
+      return apontamentoRepo;
     }
 
     return undefined;
@@ -69,6 +81,10 @@ const mockDataSource = {
       return usuarioRepo;
     }
 
+    if (entity === ApontamentoOS) {
+      return apontamentoRepo;
+    }
+
     return undefined;
   }),
 };
@@ -88,13 +104,54 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  jest.resetAllMocks();
+  mockManager.getRepository.mockImplementation((entity) => {
+    if (entity === OrdemServico) {
+      return ordemRepo;
+    }
+
+    if (entity === Equipamento) {
+      return equipamentoRepo;
+    }
+
+    if (entity === Usuario) {
+      return usuarioRepo;
+    }
+
+    if (entity === ApontamentoOS) {
+      return apontamentoRepo;
+    }
+
+    return undefined;
+  });
+  mockDataSource.getRepository.mockImplementation((entity) => {
+    if (entity === OrdemServico) {
+      return ordemRepo;
+    }
+
+    if (entity === Equipamento) {
+      return equipamentoRepo;
+    }
+
+    if (entity === Usuario) {
+      return usuarioRepo;
+    }
+
+    if (entity === ApontamentoOS) {
+      return apontamentoRepo;
+    }
+
+    return undefined;
+  });
   ordemRepo.manager.transaction.mockImplementation(async (callback) => callback(mockManager));
   ordemRepo.createQueryBuilder.mockReturnValue(queryBuilder);
   queryBuilder.leftJoinAndSelect.mockReturnThis();
   queryBuilder.where.mockReturnThis();
   queryBuilder.andWhere.mockReturnThis();
   queryBuilder.orderBy.mockReturnThis();
+  queryBuilder.getMany.mockResolvedValue([]);
+  apontamentoRepo.findOne.mockResolvedValue(null);
+  apontamentoRepo.find.mockResolvedValue([]);
 });
 
 describe("OrdemServicoService", () => {
@@ -105,29 +162,50 @@ describe("OrdemServicoService", () => {
   });
 
   test("lista ordens de serviço", async () => {
-    ordemRepo.find.mockResolvedValue([{ id: "os-1" }]);
+    queryBuilder.getMany.mockResolvedValue([{ id: "os-1" }]);
 
     const result = await ordemServicoService.getAll();
 
-    expect(result).toEqual([{ id: "os-1" }]);
+    expect(result).toEqual([
+      {
+        id: "os-1",
+        duracao_execucao_minutos: null,
+        duracao_execucao_formatada: null,
+        total_trabalhado_minutos: 0,
+        total_trabalhado_formatado: "0h 00min",
+        apontamento_aberto: false,
+      },
+    ]);
   });
 
   test("lista ordens de serviço com filtros de status e prioridade", async () => {
-    ordemRepo.find.mockResolvedValue([{ id: "os-2" }]);
+    queryBuilder.getMany.mockResolvedValue([{ id: "os-2" }]);
 
     const result = await ordemServicoService.getAll({
       status: StatusOs.ABERTA,
       prioridade: Prioridade.ALTA,
+      tecnicoId: undefined,
+      setor: undefined,
+      busca: undefined,
     });
 
-    expect(result).toEqual([{ id: "os-2" }]);
-    expect(ordemRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          status: StatusOs.ABERTA,
-          prioridade: Prioridade.ALTA,
-        },
-      })
+    expect(result).toEqual([
+      {
+        id: "os-2",
+        duracao_execucao_minutos: null,
+        duracao_execucao_formatada: null,
+        total_trabalhado_minutos: 0,
+        total_trabalhado_formatado: "0h 00min",
+        apontamento_aberto: false,
+      },
+    ]);
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      "ordemServico.status = :status",
+      { status: StatusOs.ABERTA }
+    );
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      "ordemServico.prioridade = :prioridade",
+      { prioridade: Prioridade.ALTA }
     );
   });
 
@@ -137,10 +215,21 @@ describe("OrdemServicoService", () => {
     const result = await ordemServicoService.getAll({
       status: StatusOs.ABERTA,
       prioridade: Prioridade.ALTA,
+      tecnicoId: undefined,
+      setor: undefined,
       busca: "servidor",
     });
 
-    expect(result).toEqual([{ id: "os-busca" }]);
+    expect(result).toEqual([
+      {
+        id: "os-busca",
+        duracao_execucao_minutos: null,
+        duracao_execucao_formatada: null,
+        total_trabalhado_minutos: 0,
+        total_trabalhado_formatado: "0h 00min",
+        apontamento_aberto: false,
+      },
+    ]);
     expect(ordemRepo.createQueryBuilder).toHaveBeenCalledWith("ordemServico");
     expect(queryBuilder.getMany).toHaveBeenCalled();
     expect(queryBuilder.orderBy).toHaveBeenCalledWith(
@@ -235,7 +324,7 @@ describe("OrdemServicoService", () => {
     ).rejects.toThrow("Solicitante não encontrado");
   });
 
-  test("atribui técnico e muda status para em andamento", async () => {
+  test("atribui técnico sem iniciar automaticamente", async () => {
     ordemRepo.findOne
       .mockResolvedValueOnce({
         id: "os-1",
@@ -246,7 +335,7 @@ describe("OrdemServicoService", () => {
       })
       .mockResolvedValueOnce({
         id: "os-1",
-        status: StatusOs.EM_ANDAMENTO,
+        status: StatusOs.ABERTA,
         tecnico: { id: "tec-1", nome: "Tecnico" },
         equipamento: { id: 1 },
         solicitante: { id: "sol-1" },
@@ -265,11 +354,11 @@ describe("OrdemServicoService", () => {
       "sup-1"
     );
 
-    expect(result.status).toBe(StatusOs.EM_ANDAMENTO);
+    expect(result.status).toBe(StatusOs.ABERTA);
     expect(ordemRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({
         tecnico: expect.objectContaining({ id: "tec-1" }),
-        status: StatusOs.EM_ANDAMENTO,
+        status: StatusOs.ABERTA,
       })
     );
   });
@@ -363,7 +452,8 @@ describe("OrdemServicoService", () => {
       ordemServicoService.atualizarStatus(
         "os-1",
         { status: StatusOs.EM_ANDAMENTO },
-        "sup-1"
+        "sup-1",
+        Perfil.SUPERVISOR
       )
     ).rejects.toThrow("Não é possível iniciar uma OS sem técnico atribuído");
   });
@@ -390,8 +480,9 @@ describe("OrdemServicoService", () => {
 
     const result = await ordemServicoService.atualizarStatus(
       "os-1",
-      { status: StatusOs.EM_ANDAMENTO },
-      "tec-1"
+      { status: StatusOs.EM_ANDAMENTO, observacao: "Peça já disponível" },
+      "tec-1",
+      Perfil.TECNICO
     );
 
     expect(result.status).toBe(StatusOs.EM_ANDAMENTO);
@@ -407,7 +498,7 @@ describe("OrdemServicoService", () => {
     });
 
     await expect(
-      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.EM_ANDAMENTO }, "tec-1")
+      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.EM_ANDAMENTO }, "tec-1", Perfil.TECNICO)
     ).rejects.toThrow("Não é possível alterar uma OS concluída");
   });
 
@@ -421,7 +512,7 @@ describe("OrdemServicoService", () => {
     });
 
     await expect(
-      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.EM_ANDAMENTO }, "tec-1")
+      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.EM_ANDAMENTO }, "tec-1", Perfil.TECNICO)
     ).rejects.toThrow("Não é possível alterar uma OS cancelada");
   });
 
@@ -435,7 +526,7 @@ describe("OrdemServicoService", () => {
     });
 
     await expect(
-      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.AGUARDANDO_PECA }, "tec-1")
+      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.AGUARDANDO_PECA }, "tec-1", Perfil.TECNICO)
     ).rejects.toThrow("Transição de status inválida para OS aberta");
   });
 
@@ -449,7 +540,7 @@ describe("OrdemServicoService", () => {
     });
 
     await expect(
-      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.ABERTA }, "tec-1")
+      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.ABERTA }, "tec-1", Perfil.TECNICO)
     ).rejects.toThrow("Transição de status inválida para OS em andamento");
   });
 
@@ -463,8 +554,27 @@ describe("OrdemServicoService", () => {
     });
 
     await expect(
-      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.ABERTA }, "tec-1")
+      ordemServicoService.atualizarStatus("os-1", { status: StatusOs.ABERTA }, "tec-1", Perfil.TECNICO)
     ).rejects.toThrow("Transição de status inválida para OS aguardando peça");
+  });
+
+  test("bloqueia cancelamento por técnico", async () => {
+    ordemRepo.findOne.mockResolvedValue({
+      id: "os-1",
+      status: StatusOs.EM_ANDAMENTO,
+      tecnico: { id: "tec-1" },
+      equipamento: { id: 1 },
+      solicitante: { id: "sol-1" },
+    });
+
+    await expect(
+      ordemServicoService.atualizarStatus(
+        "os-1",
+        { status: StatusOs.CANCELADA },
+        "tec-1",
+        Perfil.TECNICO
+      )
+    ).rejects.toThrow("Apenas o supervisor pode cancelar uma OS");
   });
 
   test("define inicio_em ao mover para EM_ANDAMENTO pela primeira vez", async () => {
@@ -490,7 +600,8 @@ describe("OrdemServicoService", () => {
     const result = await ordemServicoService.atualizarStatus(
       "os-1",
       { status: StatusOs.EM_ANDAMENTO },
-      "tec-1"
+      "tec-1",
+      Perfil.TECNICO
     );
 
     expect(result.status).toBe(StatusOs.EM_ANDAMENTO);
@@ -521,9 +632,9 @@ describe("OrdemServicoService", () => {
       "os-1",
       {
         descricao_servico: "Troca de placa",
-        horas_trabalhadas: 3,
       },
-      "tec-1"
+      "tec-1",
+      Perfil.TECNICO
     );
 
     expect(result.status).toBe(StatusOs.CONCLUIDA);
@@ -549,8 +660,9 @@ describe("OrdemServicoService", () => {
     await expect(
       ordemServicoService.concluirOrdemServico(
         "os-1",
-        { descricao_servico: "Teste", horas_trabalhadas: 2 },
-        "tec-1"
+        { descricao_servico: "Teste" },
+        "tec-1",
+        Perfil.TECNICO
       )
     ).rejects.toThrow("Não é possível concluir uma OS sem técnico atribuído");
   });
@@ -567,8 +679,9 @@ describe("OrdemServicoService", () => {
     await expect(
       ordemServicoService.concluirOrdemServico(
         "os-1",
-        { descricao_servico: "Teste", horas_trabalhadas: 2 },
-        "tec-1"
+        { descricao_servico: "Teste" },
+        "tec-1",
+        Perfil.TECNICO
       )
     ).rejects.toThrow("Não é possível concluir uma OS cancelada");
   });
@@ -585,28 +698,11 @@ describe("OrdemServicoService", () => {
     await expect(
       ordemServicoService.concluirOrdemServico(
         "os-1",
-        { descricao_servico: "", horas_trabalhadas: 2 },
-        "tec-1"
+        { descricao_servico: "" },
+        "tec-1",
+        Perfil.TECNICO
       )
     ).rejects.toThrow("Descrição do serviço é obrigatória");
-  });
-
-  test("bloqueia conclusão sem horas trabalhadas", async () => {
-    ordemRepo.findOne.mockResolvedValue({
-      id: "os-1",
-      status: StatusOs.EM_ANDAMENTO,
-      tecnico: { id: "tec-1" },
-      equipamento: { id: 1 },
-      solicitante: { id: "sol-1" },
-    });
-
-    await expect(
-      ordemServicoService.concluirOrdemServico(
-        "os-1",
-        { descricao_servico: "Teste", horas_trabalhadas: undefined as never },
-        "tec-1"
-      )
-    ).rejects.toThrow("Horas trabalhadas é obrigatório");
   });
 
   test("preenche inicio_em na conclusão quando ainda não existe", async () => {
@@ -631,10 +727,70 @@ describe("OrdemServicoService", () => {
 
     const result = await ordemServicoService.concluirOrdemServico(
       "os-1",
-      { descricao_servico: "Teste", horas_trabalhadas: 2 },
-      "tec-1"
+      { descricao_servico: "Teste" },
+      "tec-1",
+      Perfil.TECNICO
     );
 
     expect(result.status).toBe(StatusOs.CONCLUIDA);
+  });
+
+  test("permite técnico assumir OS aberta para si", async () => {
+    ordemRepo.findOne
+      .mockResolvedValueOnce({
+        id: "os-1",
+        status: StatusOs.ABERTA,
+        tecnico: null,
+        equipamento: { id: 1 },
+        solicitante: { id: "sol-1" },
+      })
+      .mockResolvedValueOnce({
+        id: "os-1",
+        status: StatusOs.ABERTA,
+        tecnico: { id: "tec-1", nome: "Tecnico" },
+        equipamento: { id: 1 },
+        solicitante: { id: "sol-1" },
+      });
+    usuarioRepo.findOne.mockResolvedValue({
+      id: "tec-1",
+      nome: "Tecnico",
+      perfil: Perfil.TECNICO,
+      ativo: true,
+    });
+    ordemRepo.save.mockImplementation(async (data) => data);
+
+    const result = await ordemServicoService.autoAtribuir("os-1", "tec-1");
+
+    expect(result.tecnico).toEqual(expect.objectContaining({ id: "tec-1" }));
+    expect(historicoService.registrarHistorico).toHaveBeenCalled();
+  });
+
+  test("inicia OS aberta com técnico atribuído", async () => {
+    ordemRepo.findOne
+      .mockResolvedValueOnce({
+        id: "os-1",
+        status: StatusOs.ABERTA,
+        tecnico: { id: "tec-1" },
+        equipamento: { id: 1 },
+        solicitante: { id: "sol-1" },
+        inicio_em: null,
+      })
+      .mockResolvedValueOnce({
+        id: "os-1",
+        status: StatusOs.EM_ANDAMENTO,
+        tecnico: { id: "tec-1" },
+        equipamento: { id: 1 },
+        solicitante: { id: "sol-1" },
+        inicio_em: new Date(),
+      });
+    ordemRepo.save.mockImplementation(async (data) => data);
+
+    const result = await ordemServicoService.iniciarOrdemServico(
+      "os-1",
+      "tec-1",
+      Perfil.TECNICO
+    );
+
+    expect(result.status).toBe(StatusOs.EM_ANDAMENTO);
   });
 });

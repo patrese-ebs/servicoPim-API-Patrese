@@ -27,6 +27,14 @@ export class EquipamentoController {
     return res.status(200).json(equipamento);
   }
 
+  async getDetails(req: Request, res: Response): Promise<Response> {
+    const { id } = req.params;
+
+    const equipamento = await equipamentoService.getDetailsById(Number(id));
+
+    return res.status(200).json(equipamento);
+  }
+
   async update(req: Request, res: Response): Promise<Response> {
     const { id } = req.params;
     const data = req.body;

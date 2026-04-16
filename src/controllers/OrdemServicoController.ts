@@ -21,18 +21,32 @@ export class OrdemServicoController {
   }
 
   async getAll(req: Request, res: Response): Promise<Response> {
+    if (!req.auth) {
+      throw new AppError("Usuário não autenticado", 401);
+    }
+
     const filtros = listarOrdensServicoQuerySchemaDTO.parse(req.query);
     const ordensServico = await ordemServicoService.getAll({
       status: filtros.status,
       prioridade: filtros.prioridade,
+      tecnicoId: filtros.tecnicoId,
+      setor: filtros.setor,
       busca: filtros.busca,
-    });
+    }, req.auth.sub, req.auth.perfil);
     return res.status(200).json(ordensServico);
   }
 
   async getById(req: Request, res: Response): Promise<Response> {
+    if (!req.auth) {
+      throw new AppError("Usuário não autenticado", 401);
+    }
+
     const { id } = req.params;
-    const ordemServico = await ordemServicoService.getById(id as string);
+    const ordemServico = await ordemServicoService.getById(
+      id as string,
+      req.auth.sub,
+      req.auth.perfil
+    );
     return res.status(200).json(ordemServico);
   }
 
@@ -54,6 +68,37 @@ export class OrdemServicoController {
     return res.status(200).json(ordemServico);
 }
 
+  async autoAtribuir(req: Request, res: Response): Promise<Response> {
+    const { id } = req.params;
+
+    if (!req.auth) {
+      throw new AppError("Usuário não autenticado");
+    }
+
+    const ordemServico = await ordemServicoService.autoAtribuir(
+      id as string,
+      req.auth.sub
+    );
+
+    return res.status(200).json(ordemServico);
+  }
+
+  async iniciar(req: Request, res: Response): Promise<Response> {
+    const { id } = req.params;
+
+    if (!req.auth) {
+      throw new AppError("Usuário não autenticado");
+    }
+
+    const ordemServico = await ordemServicoService.iniciarOrdemServico(
+      id as string,
+      req.auth.sub,
+      req.auth.perfil
+    );
+
+    return res.status(200).json(ordemServico);
+  }
+
   async atualizarStatus(req: Request, res: Response): Promise<Response> {
     const { id } = req.params;
 
@@ -65,7 +110,8 @@ export class OrdemServicoController {
     const ordemServico = await ordemServicoService.atualizarStatus(
       id as string,
       req.body,
-      usuarioId
+      usuarioId,
+      req.auth.perfil
     );
 
     return res.status(200).json(ordemServico);
@@ -82,7 +128,8 @@ export class OrdemServicoController {
     const ordemServico = await ordemServicoService.concluirOrdemServico(
       id as string,
       req.body,
-      usuarioId
+      usuarioId,
+      req.auth.perfil
     );
 
     return res.status(200).json(ordemServico);

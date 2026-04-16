@@ -1,52 +1,155 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/Node.js-20.x-green?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js version" />
-  <img src="https://img.shields.io/badge/TypeScript-5.x-blue?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Node.js-20%2B-green?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js version" />
+  <img src="https://img.shields.io/badge/TypeScript-6.x-blue?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/Express-5.x-lightgrey?style=for-the-badge&logo=express&logoColor=white" alt="Express" />
   <img src="https://img.shields.io/badge/PostgreSQL-16-blue?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker" />
 </p>
 
-# Serviço PIM - API
+# ServiçoPIM API
 
-API REST para abertura, acompanhamento e encerramento de ordens de serviço de manutenção industrial.
+API REST do sistema de gestão de ordens de serviço de manutenção do projeto ServiçoPIM.
 
-## Sobre o Projeto
-O backend foi estruturado em Node.js, TypeScript, Express e PostgreSQL com TypeORM. A API usa JWT para autenticação, Zod para validação de entrada e histórico de mudanças para auditoria de ordens de serviço.
+## Visão Geral
 
-Principais melhorias desta versão:
-- autenticação unificada com `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET`
-- inicialização da aplicação separada de bootstrap HTTP
-- migrations versionadas no lugar de `synchronize`
-- transações nas operações críticas de ordem de serviço
-- desativação lógica de usuários em vez de exclusão física
-- suíte integrada preparada para subir Postgres isolado via Docker
+O backend foi construído com `Node.js`, `TypeScript`, `Express`, `TypeORM` e `PostgreSQL`. Ele concentra:
 
-## O que a API faz
-- autentica usuários com `JWT`
-- controla acesso por perfil: `SOLICITANTE`, `TÉCNICO` e `SUPERVISOR`
-- gerencia usuários com `email` e `matricula` únicos
-- gerencia equipamentos
-- cria, lista, busca, atribui técnico, atualiza status e conclui ordens de serviço
-- registra histórico automático das mudanças relevantes da OS
-- expõe `GET /health` para verificação de disponibilidade
+- autenticação com `JWT`
+- autorização por perfil
+- gestão de usuários
+- gestão de equipamentos
+- fluxo completo de ordens de serviço
+- histórico de auditoria
+- apontamentos de trabalho do técnico
+- dashboard agregado por perfil
+- testes unitários e integrados
 
-## Perfis
-- `SUPERVISOR`: administra usuários e equipamentos, atribui técnico e pode atuar nas OS
-- `SOLICITANTE`: abre ordens de serviço
-- `TÉCNICO`: atualiza status e conclui ordens de serviço
+## O que a API entrega hoje
 
-## Scripts
-- `npm run dev`: sobe a API em modo desenvolvimento
-- `npm run build`: compila o projeto
-- `npm start`: executa a versão compilada em `dist/`
-- `npm run db:migrate`: aplica migrations no banco configurado no ambiente atual
-- `npm test`: roda a suíte unitária
-- `npm run test:unit`: roda explicitamente a suíte unitária
-- `npm run test:integration:jest`: roda a suíte integrada usando o banco já disponível no ambiente de teste
-- `npm run test:integration:docker`: sobe Postgres de teste, aplica migrations e executa a suíte integrada
+- login com `accessToken` e `refreshToken`
+- perfis `SOLICITANTE`, `TÉCNICO` e `SUPERVISOR`
+- CRUD de usuários com `email` e `matricula` únicos
+- CRUD de equipamentos com desativação lógica
+- criação de O.S. usando o usuário autenticado como solicitante
+- atribuição de técnico pelo supervisor
+- autoatribuição de O.S. aberta pelo técnico
+- início explícito da O.S.
+- atualização de status com observação opcional
+- conclusão da O.S. com cálculo automático de duração
+- apontamentos de trabalho para medir tempo efetivo trabalhado
+- histórico automático das mudanças relevantes
+- listagem de O.S. com filtros por:
+  - `status`
+  - `prioridade`
+  - `busca`
+  - `tecnicoId`
+  - `setor`
+- endpoint agregado de dashboard
+- healthcheck em `GET /health`
 
-## Configuração
-Variáveis principais:
+## Perfis e responsabilidades
+
+- `SOLICITANTE`
+  - abre ordens de serviço
+  - acompanha suas solicitações
+
+- `TÉCNICO`
+  - pode assumir O.S. aberta disponível
+  - pode iniciar a execução
+  - atualiza status da O.S. sob sua responsabilidade
+  - registra apontamentos de trabalho
+  - conclui a O.S.
+
+- `SUPERVISOR`
+  - administra usuários e equipamentos
+  - atribui técnico
+  - pode cancelar O.S.
+  - acompanha visão global pelo dashboard
+
+## Regras de negócio principais
+
+- `POST /ordens-servico` usa o usuário autenticado como solicitante
+- equipamentos inativos não podem receber nova O.S.
+- exclusão de equipamento é lógica (`ativo = false`)
+- técnico não pode cancelar O.S.
+- conclusão exige descrição do serviço
+- o tempo total da O.S. e o tempo efetivamente trabalhado são tratados separadamente
+- não é permitido concluir O.S. com apontamento de trabalho aberto
+- criação, atribuição, mudança de status, apontamentos e conclusão geram histórico
+
+## Módulos principais
+
+- `src/routes`
+  Define os endpoints.
+
+- `src/controllers`
+  Recebe a requisição HTTP e orquestra os serviços.
+
+- `src/services`
+  Implementa as regras de negócio.
+
+- `src/entities`
+  Mapeia as entidades do banco.
+
+- `src/middleware`
+  Autenticação, tratamento de erros e utilitários do pipeline HTTP.
+
+- `src/dtos`
+  Schemas e validações com `Zod`.
+
+- `src/database` e `src/migrations`
+  Configuração e versionamento do banco.
+
+## Principais endpoints
+
+### Auth
+
+- `POST /auth/login`
+- `POST /auth/refresh`
+
+### Usuários
+
+- `GET /usuarios`
+- `GET /usuarios/:id`
+- `POST /usuarios`
+- `PUT /usuarios/:id`
+- `DELETE /usuarios/:id`
+
+### Equipamentos
+
+- `GET /equipamentos`
+- `GET /equipamentos/:id`
+- `GET /equipamentos/:id/detalhes`
+- `POST /equipamentos`
+- `PUT /equipamentos/:id`
+- `DELETE /equipamentos/:id`
+
+### Ordens de Serviço
+
+- `GET /ordens-servico`
+- `GET /ordens-servico/:id`
+- `POST /ordens-servico`
+- `PATCH /ordens-servico/:id/atribuir-tecnico`
+- `PATCH /ordens-servico/:id/assumir`
+- `PATCH /ordens-servico/:id/iniciar`
+- `PATCH /ordens-servico/:id/status`
+- `PATCH /ordens-servico/:id/concluir`
+- `GET /ordens-servico/:id/apontamentos`
+- `POST /ordens-servico/:id/apontamentos/iniciar`
+- `PATCH /ordens-servico/:id/apontamentos/finalizar`
+
+### Dashboard e histórico
+
+- `GET /dashboard`
+- `GET /historico-os`
+- `GET /historico-os/:id`
+- `GET /historico-os/os/:osId`
+- `GET /historico-os/usuario/:usuarioId`
+
+## Ambiente e configuração
+
+As variáveis principais ficam no `.env`:
+
 - `PORT`
 - `DB_HOST`
 - `DB_PORT`
@@ -57,71 +160,102 @@ Variáveis principais:
 - `JWT_REFRESH_SECRET`
 - `DB_LOGGING`
 
-Exemplo completo em [`.env.example`](./.env.example).
+Modelo completo em [`.env.example`](./.env.example).
 
-## Como subir o projeto
-Você pode usar dois modos:
+## Como executar
 
 ### 1. Banco no Docker + API local
-Use este modo para desenvolvimento e testes manuais no Postman:
 
 ```bash
 docker compose up -d postgres pgadmin
+npm install
 npm run db:migrate
 npm run dev
 ```
 
-Nesse cenário:
-- Postgres fica exposto em `localhost:5433`
-- a API local sobe em `http://localhost:9090`
-- o PgAdmin fica em `http://localhost:8080`
+Endereços:
 
-### 2. Tudo por Docker
-Use este modo se quiser rodar a API no container:
+- API: `http://localhost:9090`
+- PostgreSQL: `localhost:5433`
+- PgAdmin: `http://localhost:8080`
+
+### 2. Tudo com Docker
 
 ```bash
 docker compose up --build -d
 ```
 
-Importante:
-- não rode `docker compose up -d` com a API no container e `npm run dev` local ao mesmo tempo
-- os dois tentam usar a mesma porta `9090`
+Evite subir a API local e a API em container ao mesmo tempo, porque ambas usam a mesma porta.
 
-## Primeiro acesso
-`POST /usuarios` exige autenticação de `SUPERVISOR`, então o primeiro supervisor precisa existir antes.
+## Scripts
 
-Fluxo recomendado:
-- criar o primeiro `SUPERVISOR` manualmente no banco
-- preencher `nome`, `email`, `matricula`, `senha_hash`, `perfil`, `setor` e `ativo`
-- fazer login em `POST /auth/login`
-- usar o `accessToken` para o restante das rotas protegidas
+- `npm run dev`
+  Sobe a API em modo desenvolvimento
 
-## Fluxo de Usuários
-- `POST /usuarios` recebe `senha` e `matricula`, não `senha_hash`
-- `DELETE /usuarios/:id` desativa o usuário (`ativo=false`) para preservar auditoria
-- login e refresh rejeitam usuários inativos
+- `npm run build`
+  Compila o projeto
 
-## Fluxo de Ordens de Serviço
-- `POST /ordens-servico` usa o usuário autenticado como solicitante
-- `GET /ordens-servico` aceita filtros opcionais por `status` e `prioridade`
-- o número da OS é gerado automaticamente pelo banco no formato `OS-0001`
-- criação, atribuição, atualização de status e conclusão geram histórico automaticamente
+- `npm start`
+  Executa a versão compilada
+
+- `npm run db:migrate`
+  Aplica as migrations no banco do ambiente atual
+
+- `npm test`
+  Roda os testes unitários
+
+- `npm run test:unit`
+  Roda explicitamente a suíte unitária
+
+- `npm run test:integration:jest`
+  Roda os testes integrados usando o banco de teste já disponível
+
+- `npm run test:integration:docker`
+  Sobe o ambiente de teste, aplica migrations, roda os integrados e derruba tudo no final
 
 ## Testes
-- `npm test`: unitários
-- `npm run test:integration:docker`: integrais com banco isolado via Docker
-- `testes-api.http`: roteiro de teste manual da API
 
-Observações sobre os testes:
-- os unitários não dependem de banco real
-- os integrados usam `.env.test` e banco de teste em `localhost:5434`
-- para os integrados funcionarem, o Docker precisa estar acessível na máquina
+### Unitários
 
-## Endpoints úteis
-- o healthcheck da aplicação está em `GET /health`
-- API local: `http://localhost:9090`
-- PgAdmin do `docker-compose.yml`: `http://localhost:8080`
+```bash
+npm test
+```
 
-## Referências do projeto
-- instruções detalhadas de setup e execução estão em [SETUP.md](./SETUP.md)
-- roteiro de testes manuais está em [testes-api.http](./testes-api.http)
+Cobrem principalmente:
+
+- services
+- regras de transição de O.S.
+- autenticação/autorização
+- filtros
+- validações de negócio
+
+### Integrados
+
+```bash
+npm run test:integration:docker
+```
+
+Cobrem fluxos ponta a ponta com banco real de teste:
+
+- auth
+- usuários
+- equipamentos
+- ordens de serviço
+- histórico
+- dashboard
+
+## Observações de arquitetura
+
+- o projeto usa `migrations`, não `synchronize`
+- os erros de negócio usam `AppError`
+- a autenticação é centralizada em middleware
+- o dashboard já usa agregação no banco para evitar processamento em memória
+- o sistema separa:
+  - tempo até início
+  - tempo até conclusão
+  - tempo efetivamente trabalhado
+
+## Referências úteis
+
+- setup detalhado: [SETUP.md](./SETUP.md)
+- roteiro de testes manuais: [testes-api.http](./testes-api.http)

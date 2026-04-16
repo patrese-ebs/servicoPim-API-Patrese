@@ -6,6 +6,7 @@ import { StatusOs } from "../types/os_status.js";
 import { Equipamento } from "./Equipamento.js";
 import { Usuario } from "./Usuario.js";
 import { HistoricoOS } from "./HistoricoOS.js";
+import { ApontamentoOS } from "./ApontamentoOS.js";
 
 
 @Entity("ordem_servico")
@@ -66,4 +67,7 @@ export class OrdemServico {
 
   @OneToMany(() => HistoricoOS, (historicoOS) => historicoOS.ordemServico)
   historicos!: Relation<HistoricoOS[]>;  
-}
+
+  @OneToMany(() => ApontamentoOS, (apontamentoOS) => apontamentoOS.ordemServico)
+  apontamentos!: Relation<ApontamentoOS[]>;
+} 
