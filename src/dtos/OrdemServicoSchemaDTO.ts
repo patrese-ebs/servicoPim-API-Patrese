@@ -16,12 +16,16 @@ export const atribuirTecnicoSchemaDTO = z.object({
 
 export const atualizarStatusSchemaDTO = z.object({
   status: z.enum(StatusOs),
+  observacao: z.string().trim().max(1000).optional().nullable(),
 });
 
 export const concluirOrdemServicoSchemaDTO = z.object({
   descricao_servico: z.string().trim().min(5).max(1000),
   pecas_utilizadas: z.string().trim().max(1000).optional().nullable(),
-  horas_trabalhadas: z.number().positive(),
+});
+
+export const apontamentoObservacaoSchemaDTO = z.object({
+  observacao: z.string().trim().max(1000).optional().nullable(),
 });
 
 export const listarOrdensServicoQuerySchemaDTO = z.object({
@@ -44,6 +48,26 @@ export const listarOrdensServicoQuerySchemaDTO = z.object({
       return value;
     },
     z.enum(Prioridade).optional()
+  ),
+  tecnicoId: z.preprocess(
+    (value) => {
+      if (value === "undefined" || value === "") {
+        return undefined;
+      }
+
+      return value;
+    },
+    z.uuid().optional()
+  ),
+  setor: z.preprocess(
+    (value) => {
+      if (value === "undefined" || value === "") {
+        return undefined;
+      }
+
+      return value;
+    },
+    z.string().trim().min(1).max(100).optional()
   ),
   busca: z.preprocess(
     (value) => {

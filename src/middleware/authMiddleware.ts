@@ -37,6 +37,6 @@ export const ensureAuth: RequestHandler = (req, _res, next) => {
     req.auth = payload;
     return next();
   } catch {
-    return next(new AppError("Token invalido ou expirado", 401));
+    return next(new AppError("Token inválido ou expirado", 401));
   }
 };

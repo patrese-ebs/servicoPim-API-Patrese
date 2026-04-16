@@ -25,6 +25,28 @@ export class EquipamentoService {
     return equipamento;
   }
 
+  async getDetailsById(id: number): Promise<Equipamento> {
+    const equipamento = await this.equipamentoRepo.findOne({
+      where: { id },
+      relations: [
+        "ordensServico",
+        "ordensServico.solicitante",
+        "ordensServico.tecnico",
+      ],
+      order: {
+        ordensServico: {
+          abertura_em: "DESC",
+        },
+      },
+    });
+
+    if (!equipamento) {
+      throw new AppError("Equipamento não encontrado");
+    }
+
+    return equipamento;
+  }
+
   async getByCodigo(codigo: string): Promise<Equipamento> {
     const equipamento = await this.equipamentoRepo.findOne({
       where: { codigo },

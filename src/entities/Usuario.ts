@@ -2,6 +2,7 @@ import {  Column,  CreateDateColumn,  Entity,  OneToMany,  PrimaryGeneratedColum
 import { Perfil } from "../types/usr_perfil.js";
 import { OrdemServico } from "./OrdemServico.js";
 import { HistoricoOS } from "./HistoricoOS.js";
+import { ApontamentoOS } from "./ApontamentoOS.js";
 
 @Entity("usuario")
 export class Usuario {
@@ -40,4 +41,7 @@ export class Usuario {
 
   @OneToMany(() => HistoricoOS, (historicoOS) => historicoOS.usuario)
   historicosOS!: Relation<HistoricoOS[]>;
+
+  @OneToMany(() => ApontamentoOS, (apontamentoOS) => apontamentoOS.tecnico)
+  apontamentosOS!: Relation<ApontamentoOS[]>;
 }
